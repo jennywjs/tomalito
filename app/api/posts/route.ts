@@ -1,6 +1,21 @@
 import { NextResponse } from "next/server";
 import { getServerSupabaseClient } from "@/lib/supabase/server";
 
+function hasMessage(e: unknown): e is { message: string } {
+  return typeof (e as { message?: unknown })?.message === "string";
+}
+
+function toErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (hasMessage(error)) return error.message;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return fallback;
+  }
+}
+
 export async function GET() {
   try {
     const supabase = getServerSupabaseClient();
@@ -12,7 +27,7 @@ export async function GET() {
     if (error) throw error;
     return NextResponse.json({ posts: data ?? [] });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to fetch posts";
+    const message = toErrorMessage(error, "Failed to fetch posts");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -44,7 +59,7 @@ export async function POST(request: Request) {
     if (error) throw error;
     return NextResponse.json({ post: data }, { status: 201 });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to create post";
+    const message = toErrorMessage(error, "Failed to create post");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 } 

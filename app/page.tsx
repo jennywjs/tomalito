@@ -1,7 +1,24 @@
 "use client";
 
 import Banner from "@/components/Banner";
-import { useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+
+type Post = {
+  id: string;
+  created_at: string;
+  author: string;
+  title_en: string;
+  content_en: string;
+  image_url: string | null;
+};
+
+function isVideo(url: string) {
+  return /\.(mp4|webm|ogg|ogv|mov|m4v)$/i.test(url);
+}
 
 export default function Home() {
   const [title, setTitle] = useState("");
@@ -10,6 +27,30 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loadingPosts, setLoadingPosts] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function loadPosts() {
+    try {
+      setLoadingPosts(true);
+      const res = await fetch("/api/posts", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load posts");
+      setPosts(json.posts as Post[]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(err);
+    } finally {
+      setLoadingPosts(false);
+    }
+  }
+
+  useEffect(() => {
+    loadPosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -40,6 +81,7 @@ export default function Home() {
       setAuthor("");
       setFile(null);
       setMessage("Post submitted!");
+      await loadPosts();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -53,32 +95,70 @@ export default function Home() {
 
       <section className="grid gap-4">
         <h2 className="text-xl font-semibold">Latest updates</h2>
-        <p className="text-sm text-muted-foreground">Mock list. Newly submitted posts will be visible after we wire the list to Supabase.</p>
-        <ul className="grid gap-3">
-          <li className="rounded-lg border p-4">
-            <div className="text-sm text-muted-foreground">2025-01-01 • by Jenny</div>
-            <div className="font-medium">Kicking off Tomalito</div>
-            <p className="text-sm mt-1">This is a mock post. Real posts will appear here once saved.</p>
-          </li>
-        </ul>
+        {loadingPosts ? (
+          <p className="text-sm text-muted-foreground">Loading posts…</p>
+        ) : posts.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No posts yet. Add your first one below.</p>
+        ) : (
+          <ul className="grid gap-3">
+            {posts.map((p) => (
+              <Card key={p.id}>
+                <CardHeader>
+                  <CardTitle className="text-base">{p.title_en}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-xs text-muted-foreground mb-2">
+                    {new Date(p.created_at).toLocaleDateString()} • by {p.author}
+                  </div>
+                  {p.image_url ? (
+                    isVideo(p.image_url) ? (
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <video
+                        className="mt-2 max-h-72 w-full rounded-md border object-contain bg-muted"
+                        src={p.image_url}
+                        controls
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image_url}
+                        alt="Post media"
+                        className="mt-2 max-h-72 w-full rounded-md border object-cover"
+                      />
+                    )
+                  ) : null}
+                  <p className="text-sm mt-3 whitespace-pre-wrap">{p.content_en}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </ul>
+        )}
       </section>
 
       <section className="grid gap-3">
         <h2 className="text-xl font-semibold">Add a new post</h2>
         <form className="grid gap-3" onSubmit={handleSubmit}>
-          <input className="border rounded-md px-3 py-2" placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} required />
-          <textarea className="border rounded-md px-3 py-2 min-h-28" placeholder="Content" value={content} onChange={(e) => setContent(e.target.value)} required />
-          <div className="flex gap-3 flex-col sm:flex-row">
-            <input className="border rounded-md px-3 py-2 flex-1" placeholder="Author" value={author} onChange={(e) => setAuthor(e.target.value)} required />
-            <input className="border rounded-md px-3 py-2 flex-1" placeholder="Image URL (optional)" value={""} readOnly hidden />
-          </div>
+          <Input placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} required />
+          <Textarea placeholder="Content" value={content} onChange={(e) => setContent(e.target.value)} required />
+          <Input placeholder="Author" value={author} onChange={(e) => setAuthor(e.target.value)} required />
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            className="hidden"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          />
           <div className="flex items-center gap-3">
-            <input type="file" accept="image/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-            {file ? <span className="text-sm text-muted-foreground">{file.name}</span> : null}
+            <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
+              {file ? "Change media" : "Upload photo or video"}
+            </Button>
+            {file ? <span className="text-sm text-muted-foreground truncate max-w-[240px]">{file.name}</span> : null}
           </div>
-          <button type="submit" disabled={submitting} className="bg-primary text-primary-foreground rounded-md px-4 py-2 w-fit disabled:opacity-60">
-            {submitting ? "Submitting..." : "Submit"}
-          </button>
+
+          <Button type="submit" disabled={submitting} className="w-fit">
+            {submitting ? "Submitting..." : "Publish post"}
+          </Button>
           {message ? <p className="text-sm">{message}</p> : null}
         </form>
       </section>
