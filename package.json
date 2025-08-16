@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:init": "node ./scripts/init-supabase.mjs"
+    "db:init": "node ./scripts/init-supabase.mjs",
+    "posts:clear": "node ./scripts/clear-posts.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.14",
@@ -20,7 +21,7 @@
     "@supabase/supabase-js": "^2.45.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "lottie-react": "^2.4.1",
+    "lottie-react": "^2.4.0",
     "lucide-react": "^0.525.0",
     "next": "15.4.4",
     "pg": "^8.12.0",
