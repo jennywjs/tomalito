@@ -7,6 +7,22 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 
+// Lightweight modal implementation
+function Modal({ open, onClose, children, title }: { open: boolean; onClose: () => void; children: React.ReactNode; title: string }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-xl border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="font-semibold">{title}</h3>
+          <button aria-label="Close" onClick={onClose} className="text-sm hover:opacity-80">✕</button>
+        </div>
+        <div className="p-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 type Post = {
   id: string;
   created_at: string;
@@ -29,6 +45,7 @@ export default function Home() {
   const [message, setMessage] = useState<string | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
+  const [open, setOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -81,6 +98,7 @@ export default function Home() {
       setAuthor("");
       setFile(null);
       setMessage("Post submitted!");
+      setOpen(false);
       await loadPosts();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Something went wrong");
@@ -94,15 +112,18 @@ export default function Home() {
       <Banner />
 
       <section className="grid gap-4">
-        <h2 className="text-xl font-semibold">Latest updates</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">Latest updates</h2>
+          <Button type="button" onClick={() => setOpen(true)}>+ Add a New Post</Button>
+        </div>
         {loadingPosts ? (
           <p className="text-sm text-muted-foreground">Loading posts…</p>
         ) : posts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No posts yet. Add your first one below.</p>
+          <p className="text-sm text-muted-foreground">No posts yet. Add your first one.</p>
         ) : (
           <ul className="grid gap-3">
             {posts.map((p) => (
-              <Card key={p.id}>
+              <Card key={p.id} className="shadow-sm border border-black/[.06] bg-white/70 backdrop-blur-sm">
                 <CardHeader>
                   <CardTitle className="text-base">{p.title_en}</CardTitle>
                 </CardHeader>
@@ -127,7 +148,7 @@ export default function Home() {
                       />
                     )
                   ) : null}
-                  <p className="text-sm mt-3 whitespace-pre-wrap">{p.content_en}</p>
+                  <p className="text-sm mt-3 whitespace-pre-wrap leading-6">{p.content_en}</p>
                 </CardContent>
               </Card>
             ))}
@@ -135,8 +156,7 @@ export default function Home() {
         )}
       </section>
 
-      <section className="grid gap-3">
-        <h2 className="text-xl font-semibold">Add a new post</h2>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add a New Post">
         <form className="grid gap-3" onSubmit={handleSubmit}>
           <Input placeholder="Title" value={title} onChange={(e) => setTitle(e.target.value)} required />
           <Textarea placeholder="Content" value={content} onChange={(e) => setContent(e.target.value)} required />
@@ -156,12 +176,15 @@ export default function Home() {
             {file ? <span className="text-sm text-muted-foreground truncate max-w-[240px]">{file.name}</span> : null}
           </div>
 
-          <Button type="submit" disabled={submitting} className="w-fit">
-            {submitting ? "Submitting..." : "Publish post"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? "Submitting..." : "Publish post"}
+            </Button>
+          </div>
           {message ? <p className="text-sm">{message}</p> : null}
         </form>
-      </section>
+      </Modal>
     </div>
   );
 }
