@@ -25,7 +25,7 @@ export default function RootLayout({
 }>) {
 	return (
 		<html lang="en">
-			<body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+			<body suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
 				<header className="border-b">
 					<nav className="mx-auto max-w-3xl px-4 py-3 flex items-center justify-between">
 						<Link href="/" className="font-semibold">Welcome, Tomalito</Link>

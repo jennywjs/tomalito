@@ -32,8 +32,29 @@ type Post = {
   image_url: string | null;
 };
 
+type ReactionCounts = Record<string, number>;
+
+type Reply = {
+  id: string;
+  created_at: string;
+  author: string;
+  content: string;
+  emoji: string | null;
+};
+
 function isVideo(url: string) {
   return /\.(mp4|webm|ogg|ogv|mov|m4v)$/i.test(url);
+}
+
+// Only heart reaction
+const EMOJIS = ["❤️"] as const;
+function getUserKey(): string {
+  if (typeof window === "undefined") return "server";
+  const key = localStorage.getItem("tomalito_user_key");
+  if (key) return key;
+  const newKey = `u_${Math.random().toString(36).slice(2)}_${Date.now()}`;
+  localStorage.setItem("tomalito_user_key", newKey);
+  return newKey;
 }
 
 export default function Home() {
@@ -47,7 +68,16 @@ export default function Home() {
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [open, setOpen] = useState(false);
 
+  const [reactions, setReactions] = useState<Record<string, ReactionCounts>>({});
+  const [userReactions, setUserReactions] = useState<Record<string, string[]>>({});
+
+  const [replies, setReplies] = useState<Record<string, Reply[]>>({});
+  const [replyOpen, setReplyOpen] = useState<Record<string, boolean>>({});
+  const [replyInputs, setReplyInputs] = useState<Record<string, { name: string; content: string }>>({});
+  const [postErrors, setPostErrors] = useState<Record<string, string>>({});
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const userKey = getUserKey();
 
   async function loadPosts() {
     try {
@@ -55,7 +85,28 @@ export default function Home() {
       const res = await fetch("/api/posts", { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load posts");
-      setPosts(json.posts as Post[]);
+      const list = (json.posts as Post[]) ?? [];
+      setPosts(list);
+      // Load reactions and replies for each post (best-effort)
+      await Promise.all(
+        list.map(async (p) => {
+          try {
+            const r = await fetch(`/api/posts/${p.id}/reactions`);
+            const rj = await r.json();
+            if (r.ok) {
+              setReactions((prev) => ({ ...prev, [p.id]: rj.counts as ReactionCounts }));
+              setUserReactions((prev) => ({ ...prev, [p.id]: (rj.userEmojis as string[]) ?? [] }));
+            }
+          } catch {}
+          try {
+            const rr = await fetch(`/api/posts/${p.id}/replies`);
+            const rrj = await rr.json();
+            if (rr.ok) {
+              setReplies((prev) => ({ ...prev, [p.id]: (rrj.replies as Reply[]) ?? [] }));
+            }
+          } catch {}
+        })
+      );
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error(err);
@@ -107,6 +158,63 @@ export default function Home() {
     }
   }
 
+  async function addReaction(postId: string, emoji: string) {
+    // Optimistic update
+    const prevCounts = reactions[postId] || {};
+    const prevUser = userReactions[postId] || [];
+    if (prevUser.includes(emoji)) return;
+
+    const nextCounts: ReactionCounts = { ...prevCounts, [emoji]: (prevCounts[emoji] ?? 0) + 1 };
+    setReactions((p) => ({ ...p, [postId]: nextCounts }));
+    setUserReactions((p) => ({ ...p, [postId]: [...prevUser, emoji] }));
+    setPostErrors((p) => ({ ...p, [postId]: "" }));
+
+    try {
+      const res = await fetch(`/api/posts/${postId}/reactions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_key: userKey, emoji }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        // revert on failure
+        setReactions((p) => ({ ...p, [postId]: prevCounts }));
+        setUserReactions((p) => ({ ...p, [postId]: prevUser }));
+        setPostErrors((p) => ({ ...p, [postId]: json.error || "Failed to like" }));
+      }
+    } catch (e) {
+      setReactions((p) => ({ ...p, [postId]: prevCounts }));
+      setUserReactions((p) => ({ ...p, [postId]: prevUser }));
+      setPostErrors((p) => ({ ...p, [postId]: e instanceof Error ? e.message : "Failed to like" }));
+    }
+  }
+
+  async function addReply(postId: string) {
+    const inp = replyInputs[postId] || { name: "", content: "" };
+    if (!inp.name || !inp.content) {
+      setPostErrors((p) => ({ ...p, [postId]: "Please enter your name and a message" }));
+      return;
+    }
+    setPostErrors((p) => ({ ...p, [postId]: "" }));
+    try {
+      const res = await fetch(`/api/posts/${postId}/replies`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author: inp.name, content: inp.content }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setReplies((prev) => ({ ...prev, [postId]: [ ...(prev[postId] ?? []), json.reply as Reply ] }));
+        setReplyInputs((prev) => ({ ...prev, [postId]: { name: "", content: "" } }));
+        setReplyOpen((prev) => ({ ...prev, [postId]: false }));
+      } else {
+        setPostErrors((p) => ({ ...p, [postId]: json.error || "Failed to reply" }));
+      }
+    } catch (e) {
+      setPostErrors((p) => ({ ...p, [postId]: e instanceof Error ? e.message : "Failed to reply" }));
+    }
+  }
+
   return (
     <div className="grid gap-8">
       <Banner />
@@ -122,36 +230,96 @@ export default function Home() {
           <p className="text-sm text-muted-foreground">No posts yet. Add your first one.</p>
         ) : (
           <ul className="grid gap-3">
-            {posts.map((p) => (
-              <Card key={p.id} className="shadow-sm border border-black/[.06] bg-white/70 backdrop-blur-sm">
-                <CardHeader>
-                  <CardTitle className="text-base">{p.title_en}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-xs text-muted-foreground mb-2">
-                    {new Date(p.created_at).toLocaleDateString()} • by {p.author}
-                  </div>
-                  {p.image_url ? (
-                    isVideo(p.image_url) ? (
-                      // eslint-disable-next-line jsx-a11y/media-has-caption
-                      <video
-                        className="mt-2 max-h-72 w-full rounded-md border object-contain bg-muted"
-                        src={p.image_url}
-                        controls
-                      />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={p.image_url}
-                        alt="Post media"
-                        className="mt-2 max-h-72 w-full rounded-md border object-cover"
-                      />
-                    )
-                  ) : null}
-                  <p className="text-sm mt-3 whitespace-pre-wrap leading-6">{p.content_en}</p>
-                </CardContent>
-              </Card>
-            ))}
+            {posts.map((p) => {
+              const heartCount = reactions[p.id]?.["❤️"] ?? 0;
+              const hearted = userReactions[p.id]?.includes("❤️");
+              return (
+                <Card key={p.id} className="shadow-sm border border-black/[.06] bg-white/70 backdrop-blur-sm">
+                  <CardHeader>
+                    <div className="flex items-center justify-between gap-3">
+                      <CardTitle className="text-base">{p.title_en}</CardTitle>
+                      <button
+                        onClick={() => addReaction(p.id, "❤️")}
+                        disabled={hearted}
+                        className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-sm hover:bg-muted ${hearted ? "opacity-60 cursor-default" : ""}`}
+                        title={hearted ? "You liked this" : "Like"}
+                      >
+                        <span>❤️</span>
+                        {heartCount > 0 ? <span className="tabular-nums">{heartCount}</span> : null}
+                      </button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      {new Date(p.created_at).toLocaleDateString()} • by {p.author}
+                    </div>
+                    {p.image_url ? (
+                      isVideo(p.image_url) ? (
+                        // eslint-disable-next-line jsx-a11y/media-has-caption
+                        <video
+                          className="mt-2 max-h-72 w-full rounded-md border object-contain bg-muted"
+                          src={p.image_url}
+                          controls
+                        />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={p.image_url}
+                          alt="Post media"
+                          className="mt-2 max-h-72 w-full rounded-md border object-cover"
+                        />
+                      )
+                    ) : null}
+                    <p className="text-sm mt-3 whitespace-pre-wrap leading-6">{p.content_en}</p>
+
+                    {postErrors[p.id] ? <p className="mt-2 text-sm text-destructive">{postErrors[p.id]}</p> : null}
+
+                    {/* Replies list */}
+                    <div className="mt-4 grid gap-2">
+                      {(replies[p.id] ?? []).map((r) => (
+                        <div key={r.id} className="ml-3 rounded-lg border bg-white/60 px-3 py-2 text-sm">
+                          <div className="text-xs text-muted-foreground">
+                            {r.author} • {new Date(r.created_at).toLocaleString()}
+                          </div>
+                          <div className="mt-1 whitespace-pre-wrap leading-6">
+                            {r.emoji ? `${r.emoji} ` : null}
+                            {r.content}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Reply composer */}
+                    <div className="mt-2">
+                      {!replyOpen[p.id] ? (
+                        <Button type="button" variant="outline" onClick={() => setReplyOpen((prev) => ({ ...prev, [p.id]: true }))}>
+                          Reply
+                        </Button>
+                      ) : (
+                        <div className="mt-2 grid gap-2">
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="Your name"
+                              value={replyInputs[p.id]?.name ?? ""}
+                              onChange={(e) => setReplyInputs((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] ?? { name: "", content: "" }), name: e.target.value } }))}
+                            />
+                          </div>
+                          <Textarea
+                            placeholder="Write a reply..."
+                            value={replyInputs[p.id]?.content ?? ""}
+                            onChange={(e) => setReplyInputs((prev) => ({ ...prev, [p.id]: { ...(prev[p.id] ?? { name: "", content: "" }), content: e.target.value } }))}
+                          />
+                          <div className="flex items-center gap-2">
+                            <Button type="button" variant="outline" onClick={() => setReplyOpen((prev) => ({ ...prev, [p.id]: false }))}>Cancel</Button>
+                            <Button type="button" onClick={() => addReply(p.id)}>Post reply</Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </ul>
         )}
       </section>

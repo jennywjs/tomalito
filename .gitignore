@@ -44,3 +44,37 @@ next-env.d.ts
 # supabase
 public.posts
 public.wishes
+
+-- Reactions table
+create table if not exists public.reactions (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_key text not null,
+  emoji text not null,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_key, emoji)
+);
+create index if not exists reactions_post_id_idx on public.reactions (post_id);
+
+-- Optional (if you haven’t created replies yet)
+create table if not exists public.replies (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  author text not null,
+  content text not null,
+  emoji text
+);
+create index if not exists replies_post_id_idx on public.replies (post_id, created_at);
+
+-- RLS + public read policies (writes use service role)
+alter table public.reactions enable row level security;
+alter table public.replies enable row level security;
+
+drop policy if exists "public read reactions" on public.reactions;
+create policy "public read reactions" on public.reactions for select using (true);
+
+drop policy if exists "public read replies" on public.replies;
+create policy "public read replies" on public.replies for select using (true);
+
+-- Refresh API schema cache
+select pg_notify('pgrst', 'reload schema');
